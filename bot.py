@@ -179,7 +179,10 @@ async def process_queue(user_id: int):
             await bot_app.bot.send_message(user_id, f"Uploading {filename}...")
             try:
                 with open(parts[0], "rb") as f:
-                    sent_msg = await bot_app.bot.send_video(user_id, video=f, filename=filename, caption=filename)
+                    sent_msg = await bot_app.bot.send_video(
+                        user_id, video=f, filename=filename, caption=filename,
+                        read_timeout=600, write_timeout=600, connect_timeout=60
+                    )
                 log_download(user_id, filename, item.url, "original", file_size_actual, sent_msg.chat.id, sent_msg.message_id)
             except Exception as e:
                 await bot_app.bot.send_message(user_id, f"Failed to send {filename}: {e}")
@@ -192,7 +195,8 @@ async def process_queue(user_id: int):
                 try:
                     with open(part_path, "rb") as f:
                         sent_msg = await bot_app.bot.send_video(
-                            user_id, video=f, filename=part_name, caption=caption
+                            user_id, video=f, filename=part_name, caption=caption,
+                            read_timeout=600, write_timeout=600, connect_timeout=60
                         )
                     log_download(user_id, part_name, item.url, "original", os.path.getsize(part_path), sent_msg.chat.id, sent_msg.message_id)
                 except Exception as e:
