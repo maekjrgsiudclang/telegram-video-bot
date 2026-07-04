@@ -1,0 +1,161 @@
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters,
+)
+from config import BOT_TOKEN, TEMP_DIR, QUALITY_PRESETS
+from downloader import get_file_size, download_file, get_filename_from_url
+from sender import prepare_video
+
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *args):
+        pass
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Send me a direct download link to a video and I'll download it for you.\n\n"
+        "You can choose quality before downloading. For files over 45MB, I'll "
+        "split them into parts automatically.\n\n"
+        "Use /help for more info."
+    )
+
+
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "How to use:\n\n"
+        "1. Send a direct video URL (e.g., from webtor.io)\n"
+        "2. I'll show you the file size and quality options\n"
+        "3. Pick a quality and I'll download + send it to you\n\n"
+        "Supported: Any direct HTTP/HTTPS video link.\n"
+        "Large files are split into 45MB parts automatically."
+    )
+
+
+async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text.strip()
+    if not url.startswith(("http://", "https://")):
+        await update.message.reply_text("Please send a valid URL starting with http:// or https://")
+        return
+
+    status_msg = await update.message.reply_text("Checking file size...")
+    file_size = await get_file_size(url)
+
+    if file_size is None:
+        await status_msg.edit_text("Could not fetch file info. Make sure the link is a direct download URL.")
+        return
+
+    size_mb = file_size / (1024 * 1024)
+    filename = get_filename_from_url(url)
+
+    keyboard = []
+    for label in QUALITY_PRESETS:
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"{label}|{url}")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await status_msg.edit_text(
+        f"File: `{filename}`\nSize: {size_mb:.1f} MB\n\nChoose quality:",
+        parse_mode="Markdown",
+        reply_markup=reply_markup,
+    )
+
+
+async def quality_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    quality, url = data.split("|", 1)
+    filename = get_filename_from_url(url)
+
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    download_path = os.path.join(TEMP_DIR, filename)
+
+    progress_msg = await query.edit_message_text(f"Downloading... 0%")
+
+    async def on_progress(downloaded: int, total: int):
+        pct = (downloaded / total) * 100
+        bar = "█" * int(pct // 5) + "░" * (20 - int(pct // 5))
+        try:
+            await progress_msg.edit_text(f"Downloading... {bar} {pct:.0f}%")
+        except Exception:
+            pass
+
+    try:
+        await download_file(url, download_path, on_progress)
+    except Exception as e:
+        await progress_msg.edit_text(f"Download failed: {e}")
+        return
+
+    await progress_msg.edit_text("Processing video...")
+
+    async def on_process(step: str):
+        if step == "compressing":
+            await progress_msg.edit_text("Compressing video...")
+        elif step == "splitting":
+            await progress_msg.edit_text("Splitting large file...")
+
+    parts = await prepare_video(download_path, quality, on_process)
+
+    if len(parts) == 1:
+        await progress_msg.edit_text("Uploading video...")
+        with open(parts[0], "rb") as f:
+            await query.message.reply_video(video=f, filename=filename, caption=filename)
+        await progress_msg.delete()
+    else:
+        total_parts = len(parts)
+        await progress_msg.edit_text(f"Uploading {total_parts} parts...")
+        for i, part_path in enumerate(parts, 1):
+            part_name = f"{Path(filename).stem} (Part {i}/{total_parts}){Path(filename).suffix}"
+            caption = f"Part {i}/{total_parts}"
+            with open(part_path, "rb") as f:
+                await query.message.reply_video(
+                    video=f, filename=part_name, caption=caption
+                )
+        await progress_msg.delete()
+
+    for p in parts:
+        if os.path.exists(p):
+            os.remove(p)
+    if os.path.exists(download_path):
+        os.remove(download_path)
+
+
+def start_health_server():
+    port = int(os.getenv("PORT", "8080"))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    server.serve_forever()
+
+
+def main():
+    if not BOT_TOKEN:
+        raise RuntimeError("Set TELEGRAM_BOT_TOKEN environment variable")
+
+    threading.Thread(target=start_health_server, daemon=True).start()
+
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+    app.add_handler(CallbackQueryHandler(quality_callback))
+
+    print("Bot is running...")
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
