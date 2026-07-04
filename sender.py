@@ -1,11 +1,23 @@
 import os
 import subprocess
+import math
 from pathlib import Path
 from typing import List
 from config import MAX_CHUNK_SIZE_MB
 
 
-TELEGRAM_MAX_SIZE = 50 * 1024 * 1024  # 50MB Telegram limit
+TELEGRAM_MAX_SIZE = 50 * 1024 * 1024
+
+
+def get_duration(input_path: str) -> float:
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        input_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return float(result.stdout.strip())
 
 
 def split_file(input_path: str) -> List[str]:
@@ -18,6 +30,11 @@ def split_file(input_path: str) -> List[str]:
     ext = Path(input_path).suffix
     stem = Path(input_path).stem
     out_dir = Path(input_path).parent
+    num_parts = math.ceil(file_size / max_bytes)
+
+    duration = get_duration(input_path)
+    segment_time = duration / num_parts + 1
+
     pattern = str(out_dir / f"{stem}_part%03d{ext}")
 
     cmd = [
@@ -25,7 +42,7 @@ def split_file(input_path: str) -> List[str]:
         "-c", "copy",
         "-movflags", "+faststart",
         "-f", "segment",
-        "-segment_bytes", str(max_bytes),
+        "-segment_time", str(segment_time),
         "-reset_timestamps", "1",
         pattern,
     ]
@@ -45,8 +62,6 @@ def split_file(input_path: str) -> List[str]:
 def prepare_video(input_path: str) -> List[str]:
     parts = split_file(input_path)
 
-    # If a part is still > 50MB, it won't upload to Telegram
-    # Check and warn
     for p in parts:
         if os.path.getsize(p) > TELEGRAM_MAX_SIZE:
             raise Exception(f"File too large for Telegram: {os.path.getsize(p) / 1024 / 1024:.0f}MB (max 50MB)")
