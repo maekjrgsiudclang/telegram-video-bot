@@ -50,7 +50,7 @@ def split_file(input_path: str) -> List[str]:
         "-reset_timestamps", "1",
         pattern,
     ]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = subprocess.run(cmd, capture_output=True, text=True)
 
     parts = sorted(out_dir.glob(f"{stem}_part*{ext}"))
     if not parts:

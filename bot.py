@@ -299,11 +299,14 @@ async def process_queue(user_id: int, status_msg=None):
             for i, part_path in enumerate(parts, 1):
                 part_name = f"{Path(filename).stem} (Part {i}/{total_parts}){Path(filename).suffix}"
                 caption = f"Part {i}/{total_parts}"
-                with open(part_path, "rb") as f:
-                    sent_msg = await bot_app.bot.send_video(
-                        user_id, video=f, filename=part_name, caption=caption
-                    )
-                log_download(user_id, part_name, item.url, item.quality, os.path.getsize(part_path), sent_msg.chat.id, sent_msg.message_id)
+                try:
+                    with open(part_path, "rb") as f:
+                        sent_msg = await bot_app.bot.send_video(
+                            user_id, video=f, filename=part_name, caption=caption
+                        )
+                    log_download(user_id, part_name, item.url, item.quality, os.path.getsize(part_path), sent_msg.chat.id, sent_msg.message_id)
+                except Exception as e:
+                    await bot_app.bot.send_message(user_id, f"Failed to send {part_name}: {e}")
 
         queue.mark_done(user_id, item.url)
 
