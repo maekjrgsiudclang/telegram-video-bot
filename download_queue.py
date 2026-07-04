@@ -6,9 +6,7 @@ from dataclasses import dataclass, field
 @dataclass
 class QueueItem:
     url: str
-    quality: str = "best"
     status: str = "pending"
-    filename: str = ""
 
 
 @dataclass
@@ -21,12 +19,11 @@ class UserQueue:
 class DownloadQueue:
     def __init__(self):
         self.queues: Dict[int, UserQueue] = {}
-        self.lock = asyncio.Lock()
 
-    def add(self, user_id: int, url: str, quality: str = "best") -> int:
+    def add(self, user_id: int, url: str) -> int:
         if user_id not in self.queues:
             self.queues[user_id] = UserQueue(user_id=user_id)
-        item = QueueItem(url=url, quality=quality)
+        item = QueueItem(url=url)
         self.queues[user_id].items.append(item)
         return len(self.queues[user_id].items)
 

@@ -14,14 +14,13 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from config import BOT_TOKEN, TEMP_DIR, QUALITY_PRESETS
+from config import BOT_TOKEN, TEMP_DIR
 from downloader import get_file_size, download_file, get_filename_from_url
 from sender import prepare_video
 from database import init_db, upsert_user, is_banned, log_download
 from admin import admin_command, admin_callback
 from download_queue import queue
 
-url_store = {}
 cancel_flags = {}
 bot_app = None
 
@@ -83,133 +82,24 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     for url in urls:
-        queue.add(user.id, url, "best")
+        queue.add(user.id, url)
 
     count = len(urls)
     status = queue.get_status(user.id)
     await update.message.reply_text(
         f"Added {count} link{'s' if count > 1 else ''} to queue.\n"
-        f"Total in queue: {status['total']}\n\n"
-        "Processing with original quality..."
+        f"Total in queue: {status['total']}"
     )
 
     if not queue.queues[user.id].processing:
         asyncio.create_task(process_queue(user.id))
 
 
-async def quality_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data
-    quality, url_id = data.split("|", 1)
-    url = url_store.pop(url_id, None)
-
-    if not url:
-        await query.edit_message_text("Session expired. Send the URL again.")
-        return
-
-    filename = get_filename_from_url(url)
-    user_id = query.from_user.id
-
-    os.makedirs(TEMP_DIR, exist_ok=True)
-    download_path = os.path.join(TEMP_DIR, filename)
-
-    dl_id = str(uuid.uuid4())[:8]
-    cancel_flags[dl_id] = False
-
-    cancel_btn = [[InlineKeyboardButton("Cancel", callback_data=f"cancel|{dl_id}")]]
-    progress_msg = await query.edit_message_text(
-        "Downloading... 0%", reply_markup=InlineKeyboardMarkup(cancel_btn)
-    )
-    last_update = [0.0]
-
-    async def on_progress(downloaded: int, total: int):
-        now = time.time()
-        if now - last_update[0] < 3:
-            return
-        last_update[0] = now
-        pct = (downloaded / total) * 100
-        bar = "█" * int(pct // 5) + "░" * (20 - int(pct // 5))
-        try:
-            await progress_msg.edit_text(
-                f"Downloading... {bar} {pct:.0f}%",
-                reply_markup=InlineKeyboardMarkup(cancel_btn),
-            )
-        except Exception:
-            pass
-
-    def is_cancelled():
-        return cancel_flags.get(dl_id, False)
-
-    try:
-        await download_file(url, download_path, on_progress, is_cancelled)
-    except Exception as e:
-        cancel_flags.pop(dl_id, None)
-        if "Cancelled" in str(e):
-            if os.path.exists(download_path):
-                os.remove(download_path)
-            await progress_msg.edit_text("Download cancelled.")
-        else:
-            await progress_msg.edit_text(f"Download failed: {e}")
-        return
-
-    cancel_flags.pop(dl_id, None)
-
-    await progress_msg.edit_text("Processing video...")
-
-    async def on_process(step: str):
-        if step == "compressing":
-            await progress_msg.edit_text("Compressing video...")
-        elif step == "splitting":
-            await progress_msg.edit_text("Splitting large file...")
-
-    try:
-        parts = await prepare_video(download_path, quality, on_process)
-    except Exception as e:
-        await progress_msg.edit_text(f"Processing failed: {e}")
-        if os.path.exists(download_path):
-            os.remove(download_path)
-        return
-
-    file_size_actual = os.path.getsize(parts[0]) if parts else 0
-
-    if len(parts) == 1:
-        await progress_msg.edit_text("Uploading video...")
-        with open(parts[0], "rb") as f:
-            sent_msg = await query.message.reply_video(video=f, filename=filename, caption=filename)
-        log_download(user_id, filename, url, quality, file_size_actual, sent_msg.chat.id, sent_msg.message_id)
-        await progress_msg.delete()
-    else:
-        total_parts = len(parts)
-        await progress_msg.edit_text(f"Uploading {total_parts} parts...")
-        for i, part_path in enumerate(parts, 1):
-            part_name = f"{Path(filename).stem} (Part {i}/{total_parts}){Path(filename).suffix}"
-            caption = f"Part {i}/{total_parts}"
-            with open(part_path, "rb") as f:
-                sent_msg = await query.message.reply_video(
-                    video=f, filename=part_name, caption=caption
-                )
-            log_download(user_id, part_name, url, quality, os.path.getsize(part_path), sent_msg.chat.id, sent_msg.message_id)
-        await progress_msg.delete()
-
-    for p in parts:
-        if os.path.exists(p):
-            os.remove(p)
-    if os.path.exists(download_path):
-        os.remove(download_path)
-
-
-async def process_queue(user_id: int, status_msg=None):
+async def process_queue(user_id: int):
     while True:
         item = queue.get_pending(user_id)
         if not item:
             queue.remove_done(user_id)
-            if status_msg:
-                try:
-                    await status_msg.edit_text("Queue complete!")
-                except Exception:
-                    pass
             break
 
         queue.mark_processing(user_id, item.url)
@@ -274,11 +164,8 @@ async def process_queue(user_id: int, status_msg=None):
         except Exception:
             pass
 
-        async def on_process(step: str):
-            pass
-
         try:
-            parts = await prepare_video(download_path, item.quality, on_process)
+            parts = prepare_video(download_path)
         except Exception as e:
             queue.mark_failed(user_id, item.url)
             await bot_app.bot.send_message(user_id, f"Processing failed: {filename}\n{e}")
@@ -290,9 +177,12 @@ async def process_queue(user_id: int, status_msg=None):
 
         if len(parts) == 1:
             await bot_app.bot.send_message(user_id, f"Uploading {filename}...")
-            with open(parts[0], "rb") as f:
-                sent_msg = await bot_app.bot.send_video(user_id, video=f, filename=filename, caption=filename)
-            log_download(user_id, filename, item.url, item.quality, file_size_actual, sent_msg.chat.id, sent_msg.message_id)
+            try:
+                with open(parts[0], "rb") as f:
+                    sent_msg = await bot_app.bot.send_video(user_id, video=f, filename=filename, caption=filename)
+                log_download(user_id, filename, item.url, "original", file_size_actual, sent_msg.chat.id, sent_msg.message_id)
+            except Exception as e:
+                await bot_app.bot.send_message(user_id, f"Failed to send {filename}: {e}")
         else:
             total_parts = len(parts)
             await bot_app.bot.send_message(user_id, f"Uploading {filename} ({total_parts} parts)...")
@@ -304,7 +194,7 @@ async def process_queue(user_id: int, status_msg=None):
                         sent_msg = await bot_app.bot.send_video(
                             user_id, video=f, filename=part_name, caption=caption
                         )
-                    log_download(user_id, part_name, item.url, item.quality, os.path.getsize(part_path), sent_msg.chat.id, sent_msg.message_id)
+                    log_download(user_id, part_name, item.url, "original", os.path.getsize(part_path), sent_msg.chat.id, sent_msg.message_id)
                 except Exception as e:
                     await bot_app.bot.send_message(user_id, f"Failed to send {part_name}: {e}")
 
@@ -394,7 +284,6 @@ def main():
     app.add_handler(CallbackQueryHandler(clear_queue_callback, pattern=r"^clear_queue$"))
     app.add_handler(CallbackQueryHandler(cancel_all_callback, pattern=r"^cancel_all$"))
     app.add_handler(CallbackQueryHandler(admin_callback, pattern=r"^admin\|"))
-    app.add_handler(CallbackQueryHandler(quality_callback))
 
     print("Bot is running...")
     app.run_polling()

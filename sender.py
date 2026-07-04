@@ -1,39 +1,17 @@
 import os
 import subprocess
-import asyncio
 from pathlib import Path
 from typing import List
-from config import MAX_CHUNK_SIZE_MB, QUALITY_PRESETS
+from config import MAX_CHUNK_SIZE_MB
 
 
-async def compress_video(input_path: str, output_path: str, height: int) -> str:
-    cmd = [
-        "ffmpeg", "-y", "-i", input_path,
-        "-vf", f"scale=-2:{height}",
-        "-c:v", "libx264", "-crf", "28",
-        "-preset", "ultrafast",
-        "-c:a", "copy",
-        output_path,
-    ]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-    )
-    try:
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
-    except asyncio.TimeoutError:
-        proc.kill()
-        raise Exception("Compression timed out (5 min limit)")
-
-    if proc.returncode != 0:
-        error_msg = stderr.decode(errors="ignore")[-500:]
-        raise Exception(f"ffmpeg failed: {error_msg}")
-
-    return output_path
+TELEGRAM_MAX_SIZE = 50 * 1024 * 1024  # 50MB Telegram limit
 
 
 def split_file(input_path: str) -> List[str]:
     max_bytes = MAX_CHUNK_SIZE_MB * 1024 * 1024
     file_size = os.path.getsize(input_path)
+
     if file_size <= max_bytes:
         return [input_path]
 
@@ -45,6 +23,7 @@ def split_file(input_path: str) -> List[str]:
     cmd = [
         "ffmpeg", "-y", "-i", input_path,
         "-c", "copy",
+        "-movflags", "+faststart",
         "-f", "segment",
         "-segment_bytes", str(max_bytes),
         "-reset_timestamps", "1",
@@ -53,24 +32,20 @@ def split_file(input_path: str) -> List[str]:
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     parts = sorted(out_dir.glob(f"{stem}_part*{ext}"))
+
     if not parts:
         return [input_path]
+
     return [str(p) for p in parts]
 
 
-async def prepare_video(input_path: str, quality: str, progress_callback=None) -> List[str]:
-    work_path = input_path
+def prepare_video(input_path: str) -> List[str]:
+    parts = split_file(input_path)
 
-    height = QUALITY_PRESETS.get(quality)
-    if height is not None:
-        if progress_callback:
-            await progress_callback("compressing")
-        compressed = input_path + ".compressed.mp4"
-        await compress_video(input_path, compressed, height)
-        work_path = compressed
-
-    if progress_callback:
-        await progress_callback("splitting")
-    parts = split_file(work_path)
+    # If a part is still > 50MB, it won't upload to Telegram
+    # Check and warn
+    for p in parts:
+        if os.path.getsize(p) > TELEGRAM_MAX_SIZE:
+            raise Exception(f"File too large for Telegram: {os.path.getsize(p) / 1024 / 1024:.0f}MB (max 50MB)")
 
     return parts
