@@ -225,7 +225,7 @@ async def process_queue(user_id: int, status_msg=None):
         status = queue.get_status(user_id)
         progress_msg = await bot_app.bot.send_message(
             user_id,
-            f"Queue: {status['done'] + 1}/{status['total']}\nDownloading {filename}...",
+            f"Queue {status['done'] + 1}/{status['total']}\nDownloading {filename}...",
             reply_markup=InlineKeyboardMarkup(cancel_btn),
         )
         last_update = [0.0]
@@ -239,7 +239,7 @@ async def process_queue(user_id: int, status_msg=None):
             bar = "█" * int(pct // 5) + "░" * (20 - int(pct // 5))
             try:
                 await progress_msg.edit_text(
-                    f"Queue: {status['done'] + 1}/{status['total']}\n"
+                    f"Queue {status['done'] + 1}/{status['total']}\n"
                     f"Downloading {filename}... {bar} {pct:.0f}%",
                     reply_markup=InlineKeyboardMarkup(cancel_btn),
                 )
@@ -257,21 +257,20 @@ async def process_queue(user_id: int, status_msg=None):
             if "Cancelled" in str(e):
                 if os.path.exists(download_path):
                     os.remove(download_path)
-                try:
-                    await progress_msg.edit_text(f"Cancelled: {filename}")
-                except Exception:
-                    pass
+                await bot_app.bot.send_message(user_id, f"Cancelled: {filename}")
             else:
-                try:
-                    await progress_msg.edit_text(f"Failed: {filename} — {e}")
-                except Exception:
-                    pass
+                await bot_app.bot.send_message(user_id, f"Failed: {filename}\n{e}")
+            try:
+                await progress_msg.delete()
+            except Exception:
+                pass
             continue
 
         cancel_flags.pop(dl_id, None)
 
+        await bot_app.bot.send_message(user_id, f"Downloaded {filename}\nProcessing...")
         try:
-            await progress_msg.edit_text(f"Queue: {status['done'] + 1}/{status['total']}\nProcessing {filename}...")
+            await progress_msg.delete()
         except Exception:
             pass
 
@@ -282,39 +281,29 @@ async def process_queue(user_id: int, status_msg=None):
             parts = await prepare_video(download_path, item.quality, on_process)
         except Exception as e:
             queue.mark_failed(user_id, item.url)
-            try:
-                await progress_msg.edit_text(f"Processing failed: {filename} — {e}")
-            except Exception:
-                pass
+            await bot_app.bot.send_message(user_id, f"Processing failed: {filename}\n{e}")
             if os.path.exists(download_path):
                 os.remove(download_path)
             continue
 
         file_size_actual = os.path.getsize(parts[0]) if parts else 0
 
-        try:
-            await progress_msg.edit_text(f"Queue: {status['done'] + 1}/{status['total']}\nUploading {filename}...")
-        except Exception:
-            pass
-
-        try:
-            if len(parts) == 1:
-                with open(parts[0], "rb") as f:
-                    sent_msg = await bot_app.bot.send_video(user_id, video=f, filename=filename, caption=filename)
-                log_download(user_id, filename, item.url, item.quality, file_size_actual, sent_msg.chat.id, sent_msg.message_id)
-            else:
-                total_parts = len(parts)
-                for i, part_path in enumerate(parts, 1):
-                    part_name = f"{Path(filename).stem} (Part {i}/{total_parts}){Path(filename).suffix}"
-                    caption = f"Part {i}/{total_parts}"
-                    with open(part_path, "rb") as f:
-                        sent_msg = await bot_app.bot.send_video(
-                            user_id, video=f, filename=part_name, caption=caption
-                        )
-                    log_download(user_id, part_name, item.url, item.quality, os.path.getsize(part_path), sent_msg.chat.id, sent_msg.message_id)
-            await progress_msg.delete()
-        except Exception:
-            pass
+        if len(parts) == 1:
+            await bot_app.bot.send_message(user_id, f"Uploading {filename}...")
+            with open(parts[0], "rb") as f:
+                sent_msg = await bot_app.bot.send_video(user_id, video=f, filename=filename, caption=filename)
+            log_download(user_id, filename, item.url, item.quality, file_size_actual, sent_msg.chat.id, sent_msg.message_id)
+        else:
+            total_parts = len(parts)
+            await bot_app.bot.send_message(user_id, f"Uploading {filename} ({total_parts} parts)...")
+            for i, part_path in enumerate(parts, 1):
+                part_name = f"{Path(filename).stem} (Part {i}/{total_parts}){Path(filename).suffix}"
+                caption = f"Part {i}/{total_parts}"
+                with open(part_path, "rb") as f:
+                    sent_msg = await bot_app.bot.send_video(
+                        user_id, video=f, filename=part_name, caption=caption
+                    )
+                log_download(user_id, part_name, item.url, item.quality, os.path.getsize(part_path), sent_msg.chat.id, sent_msg.message_id)
 
         queue.mark_done(user_id, item.url)
 
