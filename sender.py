@@ -31,10 +31,13 @@ def split_file(input_path: str) -> List[str]:
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
 
+    if result.returncode != 0:
+        raise Exception(f"Split failed: {result.stderr[-300:]}")
+
     parts = sorted(out_dir.glob(f"{stem}_part*{ext}"))
 
     if not parts:
-        return [input_path]
+        raise Exception("Split failed: no output files created")
 
     return [str(p) for p in parts]
 
