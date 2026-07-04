@@ -173,12 +173,12 @@ async def quality_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     file_size_actual = os.path.getsize(parts[0]) if parts else 0
-    log_download(user_id, filename, url, quality, file_size_actual)
 
     if len(parts) == 1:
         await progress_msg.edit_text("Uploading video...")
         with open(parts[0], "rb") as f:
-            await query.message.reply_video(video=f, filename=filename, caption=filename)
+            sent_msg = await query.message.reply_video(video=f, filename=filename, caption=filename)
+        log_download(user_id, filename, url, quality, file_size_actual, sent_msg.chat.id, sent_msg.message_id)
         await progress_msg.delete()
     else:
         total_parts = len(parts)
@@ -187,9 +187,10 @@ async def quality_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             part_name = f"{Path(filename).stem} (Part {i}/{total_parts}){Path(filename).suffix}"
             caption = f"Part {i}/{total_parts}"
             with open(part_path, "rb") as f:
-                await query.message.reply_video(
+                sent_msg = await query.message.reply_video(
                     video=f, filename=part_name, caption=caption
                 )
+            log_download(user_id, part_name, url, quality, os.path.getsize(part_path), sent_msg.chat.id, sent_msg.message_id)
         await progress_msg.delete()
 
     for p in parts:
@@ -290,7 +291,6 @@ async def process_queue(user_id: int, status_msg=None):
             continue
 
         file_size_actual = os.path.getsize(parts[0]) if parts else 0
-        log_download(user_id, filename, item.url, item.quality, file_size_actual)
 
         try:
             await progress_msg.edit_text(f"Queue: {status['done'] + 1}/{status['total']}\nUploading {filename}...")
@@ -300,16 +300,18 @@ async def process_queue(user_id: int, status_msg=None):
         try:
             if len(parts) == 1:
                 with open(parts[0], "rb") as f:
-                    await bot_app.bot.send_video(user_id, video=f, filename=filename, caption=filename)
+                    sent_msg = await bot_app.bot.send_video(user_id, video=f, filename=filename, caption=filename)
+                log_download(user_id, filename, item.url, item.quality, file_size_actual, sent_msg.chat.id, sent_msg.message_id)
             else:
                 total_parts = len(parts)
                 for i, part_path in enumerate(parts, 1):
                     part_name = f"{Path(filename).stem} (Part {i}/{total_parts}){Path(filename).suffix}"
                     caption = f"Part {i}/{total_parts}"
                     with open(part_path, "rb") as f:
-                        await bot_app.bot.send_video(
+                        sent_msg = await bot_app.bot.send_video(
                             user_id, video=f, filename=part_name, caption=caption
                         )
+                    log_download(user_id, part_name, item.url, item.quality, os.path.getsize(part_path), sent_msg.chat.id, sent_msg.message_id)
             await progress_msg.delete()
         except Exception:
             pass

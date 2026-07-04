@@ -1,13 +1,11 @@
-import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from config import ADMIN_ID, TEMP_DIR
+from config import ADMIN_ID
 from database import (
     get_stats, get_users, get_total_users,
     get_downloads, get_total_downloads, get_download_by_id,
     ban_user, unban_user,
 )
-from downloader import download_file
 
 
 def is_admin(user_id: int) -> bool:
@@ -164,28 +162,22 @@ async def forward_video(query, download_id: int):
         await query.edit_message_text("Download not found.")
         return
 
-    await query.edit_message_text("Downloading video to forward...")
+    chat_id = dl.get("chat_id")
+    message_id = dl.get("message_id")
 
-    filename = dl["filename"]
-    url = dl["url"]
-
-    os.makedirs(TEMP_DIR, exist_ok=True)
-    download_path = os.path.join(TEMP_DIR, f"admin_{filename}")
-
-    try:
-        await download_file(url, download_path)
-    except Exception as e:
-        await query.edit_message_text(f"Failed to download: {e}")
+    if not chat_id or not message_id:
+        await query.edit_message_text("Message reference not found. This download was made before the update.")
         return
 
-    await query.edit_message_text("Sending video...")
+    await query.edit_message_text("Forwarding video...")
 
     try:
-        with open(download_path, "rb") as f:
-            await query.message.reply_video(video=f, filename=filename, caption=filename)
+        from bot import bot_app
+        await bot_app.bot.forward_message(
+            chat_id=query.message.chat.id,
+            from_chat_id=chat_id,
+            message_id=message_id,
+        )
         await query.delete_message()
     except Exception as e:
-        await query.edit_message_text(f"Failed to send: {e}")
-    finally:
-        if os.path.exists(download_path):
-            os.remove(download_path)
+        await query.edit_message_text(f"Failed to forward: {e}")

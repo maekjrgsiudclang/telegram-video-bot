@@ -29,6 +29,8 @@ def init_db():
             url TEXT,
             quality TEXT,
             file_size INTEGER,
+            chat_id INTEGER,
+            message_id INTEGER,
             downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         );
@@ -71,11 +73,11 @@ def unban_user(user_id: int):
     conn.close()
 
 
-def log_download(user_id: int, filename: str, url: str, quality: str, file_size: int):
+def log_download(user_id: int, filename: str, url: str, quality: str, file_size: int, chat_id: int = None, message_id: int = None):
     conn = get_conn()
     conn.execute(
-        "INSERT INTO downloads (user_id, filename, url, quality, file_size) VALUES (?, ?, ?, ?, ?)",
-        (user_id, filename, url, quality, file_size),
+        "INSERT INTO downloads (user_id, filename, url, quality, file_size, chat_id, message_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (user_id, filename, url, quality, file_size, chat_id, message_id),
     )
     conn.commit()
     conn.close()
@@ -139,7 +141,7 @@ def get_total_downloads() -> int:
 def get_download_by_id(download_id: int) -> Optional[Dict[str, Any]]:
     conn = get_conn()
     row = conn.execute(
-        """SELECT d.id, d.filename, d.url, d.quality, d.file_size,
+        """SELECT d.id, d.filename, d.url, d.quality, d.file_size, d.chat_id, d.message_id,
                   u.username, u.first_name
            FROM downloads d
            LEFT JOIN users u ON d.user_id = u.user_id
