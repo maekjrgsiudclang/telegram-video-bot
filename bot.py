@@ -1,4 +1,5 @@
 import os
+import uuid
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -14,6 +15,8 @@ from telegram.ext import (
 from config import BOT_TOKEN, TEMP_DIR, QUALITY_PRESETS
 from downloader import get_file_size, download_file, get_filename_from_url
 from sender import prepare_video
+
+url_store = {}
 
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -40,7 +43,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "How to use:\n\n"
         "1. Send a direct video URL (e.g., from webtor.io)\n"
         "2. I'll show you the file size and quality options\n"
-        "3. Pick a quality and I'll download + send it to you\n\n"
+        "3. Pick a quality and I'll download + send it to\n\n"
         "Supported: Any direct HTTP/HTTPS video link.\n"
         "Large files are split into 45MB parts automatically."
     )
@@ -56,7 +59,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         file_size = await get_file_size(url)
     except Exception as e:
-        await status_msg.edit_text(f"Error: {e}")
+        await status_msg.edit_text(f"Error checking file: {e}")
         return
 
     if file_size is None:
@@ -66,9 +69,12 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     size_mb = file_size / (1024 * 1024)
     filename = get_filename_from_url(url)
 
+    url_id = str(uuid.uuid4())[:8]
+    url_store[url_id] = url
+
     keyboard = []
     for label in QUALITY_PRESETS:
-        keyboard.append([InlineKeyboardButton(label, callback_data=f"{label}|{url}")])
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"{label}|{url_id}")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await status_msg.edit_text(
@@ -83,13 +89,19 @@ async def quality_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     data = query.data
-    quality, url = data.split("|", 1)
+    quality, url_id = data.split("|", 1)
+    url = url_store.pop(url_id, None)
+
+    if not url:
+        await query.edit_message_text("Session expired. Send the URL again.")
+        return
+
     filename = get_filename_from_url(url)
 
     os.makedirs(TEMP_DIR, exist_ok=True)
     download_path = os.path.join(TEMP_DIR, filename)
 
-    progress_msg = await query.edit_message_text(f"Downloading... 0%")
+    progress_msg = await query.edit_message_text("Downloading... 0%")
 
     async def on_progress(downloaded: int, total: int):
         pct = (downloaded / total) * 100
