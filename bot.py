@@ -79,47 +79,19 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Please send a valid URL starting with http:// or https://")
         return
 
-    if len(urls) == 1:
-        url = urls[0]
-        status_msg = await update.message.reply_text("Checking file size...")
-        try:
-            file_size = await get_file_size(url)
-        except Exception as e:
-            await status_msg.edit_text(f"Error checking file: {e}")
-            return
+    for url in urls:
+        queue.add(user.id, url, "best")
 
-        if file_size is None:
-            await status_msg.edit_text("Could not fetch file info. Make sure the link is a direct download URL.")
-            return
+    count = len(urls)
+    status = queue.get_status(user.id)
+    await update.message.reply_text(
+        f"Added {count} link{'s' if count > 1 else ''} to queue.\n"
+        f"Total in queue: {status['total']}\n\n"
+        "Processing with original quality..."
+    )
 
-        size_mb = file_size / (1024 * 1024)
-        filename = get_filename_from_url(url)
-
-        url_id = str(uuid.uuid4())[:8]
-        url_store[url_id] = url
-
-        keyboard = []
-        for label in QUALITY_PRESETS:
-            keyboard.append([InlineKeyboardButton(label, callback_data=f"{label}|{url_id}")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await status_msg.edit_text(
-            f"File: `{filename}`\nSize: {size_mb:.1f} MB\n\nChoose quality:",
-            parse_mode="Markdown",
-            reply_markup=reply_markup,
-        )
-    else:
-        for url in urls:
-            queue.add(user.id, url, "best")
-
-        status_msg = await update.message.reply_text(
-            f"Added {len(urls)} links to queue.\n"
-            f"Total in queue: {queue.get_status(user.id)['total']}\n\n"
-            "Processing with best quality. Use /default to change."
-        )
-
-        if not queue.queues[user.id].processing:
-            asyncio.create_task(process_queue(user.id, status_msg))
+    if not queue.queues[user.id].processing:
+        asyncio.create_task(process_queue(user.id))
 
 
 async def quality_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
