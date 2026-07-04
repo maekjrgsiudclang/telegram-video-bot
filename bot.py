@@ -40,12 +40,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     upsert_user(user.id, user.username, user.first_name)
     await update.message.reply_text(
-        "Send me a direct download link to a video and I'll download it for you.\n\n"
+        "Send me a direct video link and I'll download it for you.\n\n"
         "You can send multiple links — they'll be queued and downloaded one by one.\n\n"
-        "Commands:\n"
-        "/queue — Check queue status\n"
-        "/clear — Clear your queue\n"
-        "/cancel_all — Cancel all pending downloads"
+        "Use /help for full instructions."
     )
 
 
@@ -53,14 +50,20 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     upsert_user(user.id, user.username, user.first_name)
     await update.message.reply_text(
-        "How to use:\n\n"
-        "1. Send one or more direct video URLs\n"
-        "2. Pick a quality for each (or use /default to set a default)\n"
-        "3. Bot downloads them one by one in queue\n\n"
+        "Video Downloader Bot\n\n"
+        "How to use:\n"
+        "1. Send a direct video URL (e.g., from webtor.io)\n"
+        "2. Bot downloads it in original quality and sends it to you\n"
+        "3. You can send multiple URLs — they'll be queued\n\n"
+        "Splitting:\n"
+        "Files over 45MB are split into parts automatically.\n"
+        "Each part is labeled (e.g., Part 1/3).\n\n"
         "Commands:\n"
-        "/queue — See your queue\n"
+        "/start — Welcome message\n"
+        "/help — This message\n"
+        "/queue — Check your download queue\n"
         "/clear — Clear your queue\n"
-        "/cancel_all — Cancel all pending"
+        "/admin — Admin panel (admin only)"
     )
 
 

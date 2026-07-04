@@ -44,13 +44,17 @@ def split_file(input_path: str) -> List[str]:
 
     cmd = [
         "ffmpeg", "-y", "-i", input_path,
-        "-fs", str(max_bytes),
         "-c", "copy",
+        "-f", "segment",
+        "-segment_bytes", str(max_bytes),
+        "-reset_timestamps", "1",
         pattern,
     ]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     parts = sorted(out_dir.glob(f"{stem}_part*{ext}"))
+    if not parts:
+        return [input_path]
     return [str(p) for p in parts]
 
 
