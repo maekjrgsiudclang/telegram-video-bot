@@ -371,6 +371,18 @@ async def clear_queue_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Queue cleared.")
 
 
+async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    _, dl_id = data.split("|", 1)
+
+    if dl_id in cancel_flags:
+        cancel_flags[dl_id] = True
+        await query.edit_message_text("Cancelling...")
+
+
 async def cancel_all_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
