@@ -113,8 +113,6 @@ async def quality_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     last_update = [0.0]
 
     async def on_progress(downloaded: int, total: int):
-        if cancel_flags.get(dl_id):
-            raise Exception("Cancelled")
         now = time.time()
         if now - last_update[0] < 3:
             return
@@ -129,8 +127,11 @@ async def quality_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+    def is_cancelled():
+        return cancel_flags.get(dl_id, False)
+
     try:
-        await download_file(url, download_path, on_progress)
+        await download_file(url, download_path, on_progress, is_cancelled)
     except Exception as e:
         cancel_flags.pop(dl_id, None)
         if "Cancelled" in str(e):

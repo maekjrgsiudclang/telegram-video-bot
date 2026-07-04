@@ -34,7 +34,7 @@ def get_filename_from_url(url: str) -> str:
     return name
 
 
-async def download_file(url: str, dest: str, progress_callback=None) -> str:
+async def download_file(url: str, dest: str, progress_callback=None, cancel_check=None) -> str:
     async with httpx.AsyncClient(follow_redirects=True, timeout=None) as client:
         async with client.stream("GET", url) as resp:
             resp.raise_for_status()
@@ -42,6 +42,8 @@ async def download_file(url: str, dest: str, progress_callback=None) -> str:
             downloaded = 0
             with open(dest, "wb") as f:
                 async for chunk in resp.aiter_bytes(chunk_size=1024 * 1024):
+                    if cancel_check and cancel_check():
+                        raise Exception("Cancelled")
                     f.write(chunk)
                     downloaded += len(chunk)
                     if progress_callback and total:
