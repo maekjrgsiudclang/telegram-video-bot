@@ -1,4 +1,5 @@
 import os
+import time
 import uuid
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -17,6 +18,7 @@ from downloader import get_file_size, download_file, get_filename_from_url
 from sender import prepare_video
 
 url_store = {}
+cancel_flags = {}
 
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -101,21 +103,45 @@ async def quality_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os.makedirs(TEMP_DIR, exist_ok=True)
     download_path = os.path.join(TEMP_DIR, filename)
 
-    progress_msg = await query.edit_message_text("Downloading... 0%")
+    dl_id = str(uuid.uuid4())[:8]
+    cancel_flags[dl_id] = False
+
+    cancel_btn = [[InlineKeyboardButton("Cancel", callback_data=f"cancel|{dl_id}")]]
+    progress_msg = await query.edit_message_text(
+        "Downloading... 0%", reply_markup=InlineKeyboardMarkup(cancel_btn)
+    )
+    last_update = [0.0]
 
     async def on_progress(downloaded: int, total: int):
+        if cancel_flags.get(dl_id):
+            raise Exception("Cancelled")
+        now = time.time()
+        if now - last_update[0] < 3:
+            return
+        last_update[0] = now
         pct = (downloaded / total) * 100
         bar = "█" * int(pct // 5) + "░" * (20 - int(pct // 5))
         try:
-            await progress_msg.edit_text(f"Downloading... {bar} {pct:.0f}%")
+            await progress_msg.edit_text(
+                f"Downloading... {bar} {pct:.0f}%",
+                reply_markup=InlineKeyboardMarkup(cancel_btn),
+            )
         except Exception:
             pass
 
     try:
         await download_file(url, download_path, on_progress)
     except Exception as e:
-        await progress_msg.edit_text(f"Download failed: {e}")
+        cancel_flags.pop(dl_id, None)
+        if "Cancelled" in str(e):
+            if os.path.exists(download_path):
+                os.remove(download_path)
+            await progress_msg.edit_text("Download cancelled.")
+        else:
+            await progress_msg.edit_text(f"Download failed: {e}")
         return
+
+    cancel_flags.pop(dl_id, None)
 
     await progress_msg.edit_text("Processing video...")
 
@@ -151,6 +177,18 @@ async def quality_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         os.remove(download_path)
 
 
+async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    _, dl_id = data.split("|", 1)
+
+    if dl_id in cancel_flags:
+        cancel_flags[dl_id] = True
+        await query.edit_message_text("Cancelling...")
+
+
 def start_health_server():
     port = int(os.getenv("PORT", "8080"))
     server = HTTPServer(("0.0.0.0", port), HealthHandler)
@@ -167,6 +205,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+    app.add_handler(CallbackQueryHandler(cancel_callback, pattern=r"^cancel\|"))
     app.add_handler(CallbackQueryHandler(quality_callback))
 
     print("Bot is running...")
