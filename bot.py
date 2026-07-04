@@ -19,7 +19,7 @@ from downloader import get_file_size, download_file, get_filename_from_url
 from sender import prepare_video
 from database import init_db, upsert_user, is_banned, log_download
 from admin import admin_command, admin_callback
-from queue import queue
+from download_queue import queue
 
 url_store = {}
 cancel_flags = {}
