@@ -2,6 +2,7 @@ import os
 import subprocess
 import asyncio
 from pathlib import Path
+from typing import List
 from config import MAX_CHUNK_SIZE_MB, QUALITY_PRESETS
 
 
@@ -21,7 +22,7 @@ async def compress_video(input_path: str, output_path: str, height: int) -> str:
     return output_path
 
 
-def split_file(input_path: str) -> list[str]:
+def split_file(input_path: str) -> List[str]:
     max_bytes = MAX_CHUNK_SIZE_MB * 1024 * 1024
     file_size = os.path.getsize(input_path)
     if file_size <= max_bytes:
@@ -44,7 +45,7 @@ def split_file(input_path: str) -> list[str]:
     return [str(p) for p in parts]
 
 
-async def prepare_video(input_path: str, quality: str, progress_callback=None) -> list[str]:
+async def prepare_video(input_path: str, quality: str, progress_callback=None) -> List[str]:
     work_path = input_path
 
     height = QUALITY_PRESETS.get(quality)

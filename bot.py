@@ -53,7 +53,11 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     status_msg = await update.message.reply_text("Checking file size...")
-    file_size = await get_file_size(url)
+    try:
+        file_size = await get_file_size(url)
+    except Exception as e:
+        await status_msg.edit_text(f"Error: {e}")
+        return
 
     if file_size is None:
         await status_msg.edit_text("Could not fetch file info. Make sure the link is a direct download URL.")
