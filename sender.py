@@ -16,13 +16,18 @@ async def compress_video(input_path: str, output_path: str, height: int) -> str:
         output_path,
     ]
     proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
     try:
-        await asyncio.wait_for(proc.wait(), timeout=300)
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
     except asyncio.TimeoutError:
         proc.kill()
         raise Exception("Compression timed out (5 min limit)")
+
+    if proc.returncode != 0:
+        error_msg = stderr.decode(errors="ignore")[-500:]
+        raise Exception(f"ffmpeg failed: {error_msg}")
+
     return output_path
 
 
