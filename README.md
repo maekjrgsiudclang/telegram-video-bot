@@ -29,7 +29,9 @@ git push -u origin main
    - **Name:** `telegram-video-bot`
    - **Runtime:** Docker
    - **Plan:** Free
-5. Add env variable: `TELEGRAM_BOT_TOKEN` = your bot token
+5. Add env variables:
+   - `TELEGRAM_BOT_TOKEN` = your bot token
+   - `TELEGRAM_ADMIN_ID` = your Telegram user ID (send /start to @userinfobot to get it)
 6. Click **Create Web Service**
 
 Wait 3 minutes for it to build.
@@ -46,3 +48,11 @@ Bot sleeps after 15 min idle. To wake it up:
 3. Pick a quality (best/720p/480p/360p)
 4. Bot downloads and sends the video back
 5. Large files (>45MB) are split into parts automatically
+
+## Admin Panel
+
+Send `/admin` to the bot (only works if your user ID matches `TELEGRAM_ADMIN_ID`).
+
+- **Stats** — See total users, active users, downloads, banned count
+- **Users** — Browse users, ban/unban them
+- **History** — Browse download history, forward videos to yourself

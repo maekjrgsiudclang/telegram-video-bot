@@ -16,6 +16,8 @@ from telegram.ext import (
 from config import BOT_TOKEN, TEMP_DIR, QUALITY_PRESETS
 from downloader import get_file_size, download_file, get_filename_from_url
 from sender import prepare_video
+from database import init_db, upsert_user, is_banned, log_download
+from admin import admin_command, admin_callback
 
 url_store = {}
 cancel_flags = {}
@@ -32,6 +34,8 @@ class HealthHandler(BaseHTTPRequestHandler):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    upsert_user(user.id, user.username, user.first_name)
     await update.message.reply_text(
         "Send me a direct download link to a video and I'll download it for you.\n\n"
         "You can choose quality before downloading. For files over 45MB, I'll "
@@ -41,6 +45,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    upsert_user(user.id, user.username, user.first_name)
     await update.message.reply_text(
         "How to use:\n\n"
         "1. Send a direct video URL (e.g., from webtor.io)\n"
@@ -52,6 +58,13 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    upsert_user(user.id, user.username, user.first_name)
+
+    if is_banned(user.id):
+        await update.message.reply_text("You are banned from using this bot.")
+        return
+
     url = update.message.text.strip()
     if not url.startswith(("http://", "https://")):
         await update.message.reply_text("Please send a valid URL starting with http:// or https://")
@@ -152,7 +165,16 @@ async def quality_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif step == "splitting":
             await progress_msg.edit_text("Splitting large file...")
 
-    parts = await prepare_video(download_path, quality, on_process)
+    try:
+        parts = await prepare_video(download_path, quality, on_process)
+    except Exception as e:
+        await progress_msg.edit_text(f"Processing failed: {e}")
+        if os.path.exists(download_path):
+            os.remove(download_path)
+        return
+
+    file_size_actual = os.path.getsize(parts[0]) if parts else 0
+    log_download(query.from_user.id, filename, url, quality, file_size_actual)
 
     if len(parts) == 1:
         await progress_msg.edit_text("Uploading video...")
@@ -200,13 +222,16 @@ def main():
     if not BOT_TOKEN:
         raise RuntimeError("Set TELEGRAM_BOT_TOKEN environment variable")
 
+    init_db()
     threading.Thread(target=start_health_server, daemon=True).start()
 
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("admin", admin_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
     app.add_handler(CallbackQueryHandler(cancel_callback, pattern=r"^cancel\|"))
+    app.add_handler(CallbackQueryHandler(admin_callback, pattern=r"^admin\|"))
     app.add_handler(CallbackQueryHandler(quality_callback))
 
     print("Bot is running...")
